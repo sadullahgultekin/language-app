@@ -1,0 +1,11 @@
+name = "language-app"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+
+[assets]
+directory = "./public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vocab-db"
+database_id = "d98705ec-7e74-4313-8141-e96ee5bc8ae9"
