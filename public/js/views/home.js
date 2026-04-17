@@ -14,6 +14,14 @@ export async function renderHome(container) {
   const header = document.createElement('div');
   header.className = 'page-header';
   header.innerHTML = `<h1>My Word Lists</h1>`;
+  if (lists.length > 0) {
+    const studyAllBtn = document.createElement('button');
+    studyAllBtn.className = 'btn-secondary';
+    studyAllBtn.textContent = 'Study All';
+    studyAllBtn.onclick = () => { location.hash = '#/study?lists=all'; };
+    header.appendChild(studyAllBtn);
+  }
+
   const newBtn = document.createElement('button');
   newBtn.className = 'btn-primary';
   newBtn.textContent = '+ New List';

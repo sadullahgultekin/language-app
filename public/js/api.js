@@ -37,7 +37,7 @@ export const api = {
 
   // Study
   getStudyDeck: (listIds) =>
-    request(`/study?lists=${listIds.join(',')}`),
+    request(listIds ? `/study?lists=${listIds.join(',')}` : '/study?lists=all'),
   recordResult: (wordId, correct) =>
     request('/study/result', { method: 'POST', body: JSON.stringify({ word_id: wordId, correct }) }),
 };

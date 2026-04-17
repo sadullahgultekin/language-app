@@ -78,8 +78,11 @@ export async function deleteWord(db: DB, id: number): Promise<void> {
 
 // --- Study ---
 
-export async function getStudyDeck(db: DB, listIds: number[]): Promise<StudyWord[]> {
-  const placeholders = listIds.map(() => '?').join(',');
+export async function getStudyDeck(db: DB, listIds: number[] | null): Promise<StudyWord[]> {
+  const allWords = listIds === null;
+  const placeholders = allWords ? '' : listIds!.map(() => '?').join(',');
+  const whereClause = allWords ? '' : `WHERE w.list_id IN (${placeholders})`;
+  const bindings = allWords ? [] : listIds!;
   // Spaced repetition intervals (in hours) per confidence level:
   // 0 = new word, 1 = 4h, 2 = 24h (1 day), 3 = 72h (3 days), 4 = 168h (7 days), 5 = 336h (14 days)
   //
@@ -121,10 +124,10 @@ export async function getStudyDeck(db: DB, listIds: number[]): Promise<StudyWord
       END as hours_overdue
     FROM words w
     LEFT JOIN study_progress sp ON sp.word_id = w.id
-    WHERE w.list_id IN (${placeholders})
+    ${whereClause}
     ORDER BY priority ASC, hours_overdue DESC, RANDOM()
     LIMIT 30
-  `).bind(...listIds).all<StudyWord>();
+  `).bind(...bindings).all<StudyWord>();
   return results;
 }
 

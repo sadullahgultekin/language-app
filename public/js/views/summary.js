@@ -55,7 +55,7 @@ export function renderSummary(container, { listIds, results }) {
   const actionsDiv = document.createElement('div');
   actionsDiv.className = 'summary-actions';
   actionsDiv.innerHTML = `
-    <a href="#/study?lists=${listIds.join(',')}" class="btn-primary" style="text-decoration:none;padding:14px 28px">Study Again</a>
+    <a href="#/study?lists=${listIds ? listIds.join(',') : 'all'}" class="btn-primary" style="text-decoration:none;padding:14px 28px">Study Again</a>
     <a href="#/" class="btn-secondary" style="text-decoration:none;padding:14px 28px">Back to Lists</a>
   `;
   summary.appendChild(actionsDiv);

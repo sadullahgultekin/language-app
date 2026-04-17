@@ -9,11 +9,12 @@ app.get('/', async (c) => {
   if (!listsParam) {
     return c.json({ error: 'lists query parameter is required' }, 400);
   }
-  const listIds = listsParam.split(',').map(Number).filter(n => !isNaN(n));
-  if (listIds.length === 0) {
+  const allWords = listsParam === 'all';
+  const listIds = allWords ? [] : listsParam.split(',').map(Number).filter(n => !isNaN(n));
+  if (!allWords && listIds.length === 0) {
     return c.json({ error: 'At least one valid list ID is required' }, 400);
   }
-  const deck = await db.getStudyDeck(c.env.DB, listIds);
+  const deck = await db.getStudyDeck(c.env.DB, allWords ? null : listIds);
   // Strip internal sorting fields from response
   const cleaned = deck.map(({ priority, hours_overdue, ...word }: any) => word);
   return c.json(cleaned);

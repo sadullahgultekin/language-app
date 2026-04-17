@@ -25,6 +25,10 @@ export async function renderStudy(container, listIds) {
   let animating = false;
   const results = [];
 
+  // Review mode: browsing answered cards
+  let reviewing = false;
+  let reviewIndex = 0;
+
   container.innerHTML = '';
 
   const studyContainer = document.createElement('div');
@@ -34,6 +38,16 @@ export async function renderStudy(container, listIds) {
   const progress = document.createElement('div');
   progress.className = 'study-progress';
   studyContainer.appendChild(progress);
+
+  // Back/Forward nav
+  const nav = document.createElement('div');
+  nav.className = 'study-nav';
+  nav.innerHTML = `
+    <button id="nav-back">&#8592; Back</button>
+    <span class="nav-label" id="nav-label"></span>
+    <button id="nav-fwd">Forward &#8594;</button>
+  `;
+  studyContainer.appendChild(nav);
 
   // Flashcard
   const wrapper = document.createElement('div');
@@ -54,7 +68,7 @@ export async function renderStudy(container, listIds) {
   `;
   studyContainer.appendChild(wrapper);
 
-  // Actions (hidden until flipped)
+  // Actions (hidden until flipped, hidden in review mode)
   const actions = document.createElement('div');
   actions.className = 'study-actions';
   actions.innerHTML = `
@@ -66,7 +80,7 @@ export async function renderStudy(container, listIds) {
   // Keyboard hint
   const hint = document.createElement('div');
   hint.className = 'study-hint';
-  hint.innerHTML = 'Space: flip &middot; &rarr; / Enter: got it &middot; &larr;: missed it';
+  hint.innerHTML = 'Space: flip &middot; &rarr; / Enter: got it &middot; &larr;: missed it / back';
   studyContainer.appendChild(hint);
 
   // Swipe hint (only shown on touch)
@@ -80,12 +94,36 @@ export async function renderStudy(container, listIds) {
   const flashcard = wrapper.querySelector('.flashcard');
   const correctOverlay = wrapper.querySelector('.swipe-correct');
   const wrongOverlay = wrapper.querySelector('.swipe-wrong');
+  const navBack = nav.querySelector('#nav-back');
+  const navFwd = nav.querySelector('#nav-fwd');
+  const navLabel = nav.querySelector('#nav-label');
+
+  function updateNav() {
+    if (reviewing) {
+      navBack.classList.toggle('hidden', reviewIndex <= 0);
+      navFwd.classList.remove('hidden');
+      navLabel.textContent = `${reviewIndex + 1} / ${current + 1}`;
+    } else {
+      // On the live card: back is available if there are answered cards
+      navBack.classList.toggle('hidden', results.length === 0);
+      navFwd.classList.add('hidden');
+      navLabel.textContent = '';
+    }
+  }
+
+  function populateCard(word) {
+    wrapper.querySelector('.word').textContent = word.word;
+    wrapper.querySelector('.translation').textContent = word.translation;
+    wrapper.querySelector('.description').textContent = word.description || '';
+  }
 
   function showCard(enterWithZoom) {
+    reviewing = false;
     const word = deck[current];
     flipped = false;
     animating = false;
     actions.classList.remove('visible');
+    flashcard.classList.remove('result-correct', 'result-wrong');
 
     wrapper.querySelector('.word').textContent = word.word;
     wrapper.querySelector('.translation').textContent = '';
@@ -98,23 +136,19 @@ export async function renderStudy(container, listIds) {
     flashcard.style.opacity = '1';
 
     if (enterWithZoom) {
-      // Zoom-in entrance: start small, scale up
       flashcard.style.transition = 'none';
       flashcard.style.transform = 'scale(0.8)';
       flashcard.style.opacity = '0';
 
-      // Force reflow so the initial state applies before transition
       void flashcard.offsetWidth;
 
       flashcard.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease';
       flashcard.style.transform = 'scale(1)';
       flashcard.style.opacity = '1';
 
-      // Populate back side after zoom-in finishes
       setTimeout(() => {
         wrapper.querySelector('.translation').textContent = word.translation;
         wrapper.querySelector('.description').textContent = word.description || '';
-        // Reset transition to default flip transition
         flashcard.style.transition = '';
         flashcard.style.transform = '';
       }, 320);
@@ -131,22 +165,53 @@ export async function renderStudy(container, listIds) {
     }
 
     updateProgress();
+    updateNav();
+  }
+
+  function showReviewCard(index) {
+    reviewing = true;
+    reviewIndex = index;
+    const result = results[index];
+    flipped = false;
+    animating = false;
+
+    actions.classList.remove('visible');
+    flashcard.classList.remove('flipped', 'result-correct', 'result-wrong');
+    flashcard.style.transition = '';
+    flashcard.style.transform = '';
+    flashcard.style.opacity = '1';
+    correctOverlay.style.opacity = '0';
+    wrongOverlay.style.opacity = '0';
+
+    populateCard(result);
+
+    flashcard.classList.add(result.correct ? 'result-correct' : 'result-wrong');
+
+    updateProgress();
+    updateNav();
   }
 
   function flip() {
-    if (flipped || animating) return;
-    flipped = true;
+    if (animating) return;
+    flipped = !flipped;
     flashcard.style.transition = 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
     flashcard.style.transform = '';
-    flashcard.classList.add('flipped');
-    actions.classList.add('visible');
+    if (flipped) {
+      flashcard.classList.add('flipped');
+      if (!reviewing) actions.classList.add('visible');
+    } else {
+      flashcard.classList.remove('flipped');
+      actions.classList.remove('visible');
+    }
   }
 
   function updateProgress() {
-    const pct = Math.round((current / deck.length) * 100);
+    const total = deck.length;
+    const shown = reviewing ? reviewIndex + 1 : current + 1;
+    const pct = Math.round((current / total) * 100);
     progress.innerHTML = `
       <div class="study-progress-header">
-        <span class="study-progress-label">${current + 1} / ${deck.length}</span>
+        <span class="study-progress-label">${shown} / ${total}</span>
         <span class="study-progress-label">${pct}%</span>
       </div>
       <div class="study-progress-bar">
@@ -165,7 +230,7 @@ export async function renderStudy(container, listIds) {
   }
 
   function answer(correct, viaSwipe) {
-    if (!flipped || animating) return;
+    if (!flipped || animating || reviewing) return;
     animating = true;
 
     const word = deck[current];
@@ -173,12 +238,28 @@ export async function renderStudy(container, listIds) {
     api.recordResult(word.id, correct);
 
     if (viaSwipe) {
-      // Card is already flying off, wait for it then show next with zoom
       setTimeout(() => advance(true), 280);
     } else {
       advance(false);
     }
   }
+
+  navBack.onclick = () => {
+    if (reviewing) {
+      if (reviewIndex > 0) showReviewCard(reviewIndex - 1);
+    } else {
+      if (results.length > 0) showReviewCard(results.length - 1);
+    }
+  };
+
+  navFwd.onclick = () => {
+    if (!reviewing) return;
+    if (reviewIndex < results.length - 1) {
+      showReviewCard(reviewIndex + 1);
+    } else {
+      showCard(false);
+    }
+  };
 
   // Tap to flip
   wrapper.addEventListener('click', (e) => {
@@ -191,9 +272,29 @@ export async function renderStudy(container, listIds) {
 
   // Keyboard
   function onKey(e) {
-    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); flip(); }
-    else if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); answer(true, false); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); answer(false, false); }
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      flip();
+    } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+      e.preventDefault();
+      if (reviewing) {
+        navFwd.onclick();
+      } else {
+        answer(true, false);
+      }
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      if (reviewing) {
+        navBack.onclick();
+      } else {
+        // If not flipped, go back to review; if flipped, record as missed
+        if (!flipped) {
+          navBack.onclick();
+        } else {
+          answer(false, false);
+        }
+      }
+    }
   }
   document.addEventListener('keydown', onKey);
 
@@ -205,7 +306,7 @@ export async function renderStudy(container, listIds) {
   const SWIPE_THRESHOLD = 80;
 
   wrapper.addEventListener('touchstart', (e) => {
-    if (!flipped || animating) return;
+    if (!flipped || animating || reviewing) return;
     const touch = e.touches[0];
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
@@ -215,7 +316,7 @@ export async function renderStudy(container, listIds) {
   }, { passive: true });
 
   wrapper.addEventListener('touchmove', (e) => {
-    if (!flipped || animating) return;
+    if (!flipped || animating || reviewing) return;
     const touch = e.touches[0];
     const dx = touch.clientX - touchStartX;
     const dy = touch.clientY - touchStartY;
@@ -232,7 +333,6 @@ export async function renderStudy(container, listIds) {
     const rotate = offset * 0.08;
     const swipeProgress = Math.min(Math.abs(offset) / SWIPE_THRESHOLD, 1);
 
-    // rotateY(180deg) mirrors the X axis, so negate translateX to match finger direction
     flashcard.style.transform = `rotateY(180deg) translateX(${-offset}px) rotate(${-rotate}deg)`;
 
     if (offset > 0) {
@@ -245,24 +345,21 @@ export async function renderStudy(container, listIds) {
   }, { passive: false });
 
   wrapper.addEventListener('touchend', () => {
-    if (!flipped || animating || !isSwiping) return;
+    if (!flipped || animating || !isSwiping || reviewing) return;
 
     const dx = touchCurrentX - touchStartX;
     flashcard.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
 
     if (Math.abs(dx) >= SWIPE_THRESHOLD) {
-      // Swipe confirmed — fly off in the direction of the swipe
       const direction = dx > 0 ? 1 : -1;
       const flyX = direction * window.innerWidth;
-      // Negate because rotateY(180deg) mirrors X
       flashcard.style.transform = `rotateY(180deg) translateX(${-flyX}px) rotate(${-direction * 20}deg)`;
       flashcard.style.opacity = '0';
       answer(direction > 0, true);
     } else {
-      // Snap back
       flashcard.style.transform = 'rotateY(180deg)';
-      leftIndicator.style.opacity = '0';
-      rightIndicator.style.opacity = '0';
+      correctOverlay.style.opacity = '0';
+      wrongOverlay.style.opacity = '0';
     }
 
     isSwiping = false;

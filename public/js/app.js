@@ -23,7 +23,9 @@ function route() {
     renderListDetail(appEl, id);
   } else if (path === '/study') {
     const lists = params.get('lists');
-    if (lists) {
+    if (lists === 'all') {
+      renderStudy(appEl, null);
+    } else if (lists) {
       renderStudy(appEl, lists.split(',').map(Number));
     } else {
       location.hash = '#/';
