@@ -45,6 +45,6 @@ export const api = {
   // Study
   getStudyDeck: (listIds, practice = false) =>
     request(listIds ? `/study?lists=${listIds.join(',')}${practice ? '&practice=1' : ''}` : `/study?lists=all${practice ? '&practice=1' : ''}`),
-  recordResult: (wordId, grade) =>
-    request('/study/result', { method: 'POST', body: JSON.stringify({ word_id: wordId, grade }) }),
+  recordResult: (wordId, grade, countsTowardProgress = true) =>
+    request('/study/result', { method: 'POST', body: JSON.stringify({ word_id: wordId, grade, counts_toward_progress: countsTowardProgress }) }),
 };

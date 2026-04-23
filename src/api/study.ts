@@ -22,12 +22,13 @@ app.get('/', async (c) => {
 });
 
 app.post('/result', async (c) => {
-  const body = await c.req.json<{ word_id: number; grade: Grade }>();
+  const body = await c.req.json<{ word_id: number; grade: Grade; counts_toward_progress?: boolean }>();
   const validGrades = [1, 2, 3, 4];
   if (typeof body.word_id !== 'number' || !validGrades.includes(body.grade)) {
     return c.json({ error: 'word_id (number) and grade (1|2|3|4) are required' }, 400);
   }
-  await db.recordStudyResult(c.env.DB, body.word_id, body.grade);
+  const counts = body.counts_toward_progress !== false;
+  await db.recordStudyResult(c.env.DB, body.word_id, body.grade, counts);
   return c.json({ ok: true });
 });
 

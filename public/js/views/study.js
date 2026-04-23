@@ -232,9 +232,11 @@ export async function renderStudy(container, listIds, practice = false) {
     const total = deck.length;
     const shown = reviewing ? reviewIndex + 1 : current + 1;
     const pct = Math.round((current / total) * 100);
+    const currentCard = reviewing ? deck[reviewIndex] : deck[current];
+    const practiceOnly = currentCard && currentCard.counts_toward_progress === 0;
     progress.innerHTML = `
       <div class="study-progress-header">
-        <span class="study-progress-label">${shown} / ${total}</span>
+        <span class="study-progress-label">${shown} / ${total}${practiceOnly ? ' <span class="practice-badge">Practice</span>' : ''}</span>
         <span class="study-progress-label">${pct}%</span>
       </div>
       <div class="study-progress-bar">
@@ -259,7 +261,7 @@ export async function renderStudy(container, listIds, practice = false) {
 
     const word = deck[current];
     results.push({ ...word, correct: grade >= 3 });
-    api.recordResult(word.id, grade);
+    api.recordResult(word.id, grade, word.counts_toward_progress !== 0);
 
     if (viaSwipe) {
       setTimeout(() => advance(true), 280);

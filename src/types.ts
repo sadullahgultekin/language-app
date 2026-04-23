@@ -54,6 +54,7 @@ export interface StudyWord extends Word {
   is_new: boolean;
   is_learning: boolean;
   is_review: boolean;
+  counts_toward_progress: 0 | 1;
   // internal sorting fields stripped before response
   priority?: number;
 }

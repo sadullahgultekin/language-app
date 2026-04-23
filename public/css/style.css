@@ -480,6 +480,20 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
   transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.practice-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 /* ─── Flashcard ─── */
 .flashcard-wrapper {
   perspective: 1200px;

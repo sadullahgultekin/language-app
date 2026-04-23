@@ -3,8 +3,9 @@ import { schedule, Grade, SM2State } from './sm2';
 
 type DB = Env['DB'];
 
-const MAX_NEW_PER_DAY = 20;
+const MAX_NEW_PROGRESS_PER_DAY = 20; // only the first 20 new-word introductions/day update SRS
 const MAX_REVIEWS_PER_DAY = 200;
+const MAX_DECK_SIZE = 100;
 
 // --- Lists ---
 
@@ -98,15 +99,16 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
   const bindings: (number | string)[] = allWords ? [] : listIds!;
 
   const todayStats = await getTodayStats(db);
-  const newBudget = Math.max(0, MAX_NEW_PER_DAY - todayStats.new_introduced);
+  const newProgressBudget = Math.max(0, MAX_NEW_PROGRESS_PER_DAY - todayStats.new_introduced);
   const reviewBudget = Math.max(0, MAX_REVIEWS_PER_DAY - todayStats.reviews_done);
 
-  // 1. Learning queue: words in learning phase that are due
+  // 1. Learning queue: words in learning phase that are due (always count toward progress)
   const { results: learningCards } = await db.prepare(`
     SELECT w.*,
       sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
       sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
       0 as is_new, 1 as is_learning, 0 as is_review,
+      1 as counts_toward_progress,
       0 as priority
     FROM words w
     JOIN study_progress sp ON sp.word_id = w.id
@@ -116,12 +118,13 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
     ORDER BY sp.due_at ASC
   `).bind(...bindings).all<StudyWord>();
 
-  // 2. Review queue: graduated cards that are due (respects daily cap)
+  // 2. Review queue: graduated cards that are due (always count toward progress)
   const { results: reviewCards } = await db.prepare(`
     SELECT w.*,
       sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
       sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
       0 as is_new, 0 as is_learning, 1 as is_review,
+      1 as counts_toward_progress,
       1 as priority
     FROM words w
     JOIN study_progress sp ON sp.word_id = w.id
@@ -132,8 +135,9 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
     LIMIT ?
   `).bind(...bindings, reviewBudget).all<StudyWord>();
 
-  // 3. New queue: words with no progress row yet (respects daily cap)
-  const { results: newCards } = newBudget > 0
+  // 3. New queue: fetch up to remaining deck slots; first newProgressBudget count toward progress
+  const newSlots = Math.max(0, MAX_DECK_SIZE - learningCards.length - reviewCards.length);
+  const { results: newCardsRaw } = newSlots > 0
     ? await db.prepare(`
         SELECT w.*,
           2.5 as easiness, 0 as interval_days, 0 as repetitions, 1 as learning_step,
@@ -146,31 +150,85 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
           ${whereClause}
         ORDER BY RANDOM()
         LIMIT ?
-      `).bind(...bindings, newBudget).all<StudyWord>()
+      `).bind(...bindings, newSlots).all<StudyWord>()
     : { results: [] as StudyWord[] };
+
+  // Tag which new cards count toward progress
+  const newCards = newCardsRaw.map((card, i) => ({
+    ...card,
+    counts_toward_progress: (i < newProgressBudget ? 1 : 0) as 0 | 1,
+  }));
 
   const deck = [...learningCards, ...reviewCards, ...newCards];
 
-  // 4. Filler (practice mode only): not-yet-due cards
+  // 4. Filler (practice mode only): surface all not-yet-due cards when normal deck is empty
   if (practice && deck.length === 0) {
-    const { results: practiceCards } = await db.prepare(`
+    const practiceSlots = MAX_DECK_SIZE;
+
+    // 4a. Learning-phase cards not yet due (already introduced, so no progress impact)
+    const { results: learningNotDue } = await db.prepare(`
       SELECT w.*,
         sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
         sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
-        0 as is_new, 0 as is_learning, 1 as is_review,
-        3 as priority
+        0 as is_new, 1 as is_learning, 0 as is_review,
+        0 as counts_toward_progress,
+        0 as priority
       FROM words w
       JOIN study_progress sp ON sp.word_id = w.id
-      WHERE sp.learning_step = 0
+      WHERE sp.learning_step > 0
         AND sp.due_at > datetime('now')
         ${whereClause}
       ORDER BY sp.due_at ASC
-      LIMIT 30
-    `).bind(...bindings).all<StudyWord>();
-    return practiceCards;
+      LIMIT ?
+    `).bind(...bindings, practiceSlots).all<StudyWord>();
+
+    // 4b. Never-seen words (first newProgressBudget count toward progress)
+    const newSlotsInPractice = Math.max(0, practiceSlots - learningNotDue.length);
+    const { results: neverSeenRaw } = newSlotsInPractice > 0
+      ? await db.prepare(`
+          SELECT w.*,
+            2.5 as easiness, 0 as interval_days, 0 as repetitions, 1 as learning_step,
+            0 as lapses, 0 as correct_count, 0 as incorrect_count, NULL as due_at,
+            1 as is_new, 0 as is_learning, 0 as is_review,
+            2 as priority
+          FROM words w
+          LEFT JOIN study_progress sp ON sp.word_id = w.id
+          WHERE sp.id IS NULL
+            ${whereClause}
+          ORDER BY RANDOM()
+          LIMIT ?
+        `).bind(...bindings, newSlotsInPractice).all<StudyWord>()
+      : { results: [] as StudyWord[] };
+
+    const neverSeen = neverSeenRaw.map((card, i) => ({
+      ...card,
+      counts_toward_progress: (i < newProgressBudget ? 1 : 0) as 0 | 1,
+    }));
+
+    // 4c. Graduated not-yet-due cards (practice-only — SM-2 early-review guard prevents advancement)
+    const graduatedSlots = Math.max(0, practiceSlots - learningNotDue.length - neverSeen.length);
+    const { results: graduatedNotDue } = graduatedSlots > 0
+      ? await db.prepare(`
+          SELECT w.*,
+            sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
+            sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
+            0 as is_new, 0 as is_learning, 1 as is_review,
+            0 as counts_toward_progress,
+            3 as priority
+          FROM words w
+          JOIN study_progress sp ON sp.word_id = w.id
+          WHERE sp.learning_step = 0
+            AND sp.due_at > datetime('now')
+            ${whereClause}
+          ORDER BY sp.due_at ASC
+          LIMIT ?
+        `).bind(...bindings, graduatedSlots).all<StudyWord>()
+      : { results: [] as StudyWord[] };
+
+    return [...learningNotDue, ...neverSeen, ...graduatedNotDue].slice(0, practiceSlots);
   }
 
-  return deck.slice(0, 30);
+  return deck.slice(0, MAX_DECK_SIZE);
 }
 
 export async function resetListProgress(db: DB, listId: number): Promise<void> {
@@ -180,7 +238,8 @@ export async function resetListProgress(db: DB, listId: number): Promise<void> {
   `).bind(listId).run();
 }
 
-export async function recordStudyResult(db: DB, wordId: number, grade: Grade): Promise<void> {
+export async function recordStudyResult(db: DB, wordId: number, grade: Grade, countsTowardProgress = true): Promise<void> {
+  if (!countsTowardProgress) return;
   const today = new Date().toISOString().slice(0, 10);
 
   // Get or create study_progress row
