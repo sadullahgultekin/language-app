@@ -1,4 +1,4 @@
-const CACHE = 'vocab-v1';
+const CACHE = 'vocab-__BUILD_TS__';
 const SHELL = [
   '/',
   '/css/style.css',
