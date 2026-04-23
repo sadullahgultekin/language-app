@@ -144,7 +144,7 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
         LEFT JOIN study_progress sp ON sp.word_id = w.id
         WHERE sp.id IS NULL
           ${whereClause}
-        ORDER BY w.created_at ASC
+        ORDER BY RANDOM()
         LIMIT ?
       `).bind(...bindings, newBudget).all<StudyWord>()
     : { results: [] as StudyWord[] };
