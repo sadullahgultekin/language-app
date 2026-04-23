@@ -1,5 +1,7 @@
 export interface Env {
   DB: D1Database;
+  VAPID_PUBLIC_KEY: string;
+  VAPID_PRIVATE_KEY: string;
 }
 
 export interface List {

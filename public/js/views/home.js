@@ -2,6 +2,57 @@ import { api } from '../api.js';
 
 const CARD_COLORS = ['green', 'blue', 'amber', 'purple'];
 
+async function setupPushNotifications(container) {
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (Notification.permission === 'denied') return;
+  if (Notification.permission === 'granted') {
+    await subscribeToPush();
+    return;
+  }
+
+  // Show a prompt banner if permission not yet asked
+  const banner = document.createElement('div');
+  banner.className = 'notif-banner';
+  banner.innerHTML = `
+    <span>Get daily reminders when words are due for review</span>
+    <button class="btn-primary btn-sm" id="notif-allow">Enable notifications</button>
+    <button class="btn-secondary btn-sm" id="notif-dismiss">Not now</button>
+  `;
+  container.insertBefore(banner, container.firstChild);
+
+  banner.querySelector('#notif-allow').onclick = async () => {
+    banner.remove();
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') await subscribeToPush();
+  };
+  banner.querySelector('#notif-dismiss').onclick = () => banner.remove();
+}
+
+async function subscribeToPush() {
+  try {
+    const sw = await navigator.serviceWorker.ready;
+    let sub = await sw.pushManager.getSubscription();
+    if (sub) {
+      // Re-register existing subscription so server always has it
+      await api.subscribePush(sub.toJSON());
+      return;
+    }
+    const { key } = await api.getVapidPublicKey();
+    const keyBytes = urlB64ToUint8Array(key);
+    sub = await sw.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes });
+    await api.subscribePush(sub.toJSON());
+  } catch (e) {
+    console.warn('Push subscription failed:', e);
+  }
+}
+
+function urlB64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 export async function renderHome(container) {
   container.innerHTML = '<p style="text-align:center;padding:40px;font-weight:700;color:#999">Loading...</p>';
 
@@ -115,6 +166,8 @@ export async function renderHome(container) {
     window.removeEventListener('hashchange', cleanup);
   };
   window.addEventListener('hashchange', cleanup);
+
+  setupPushNotifications(container);
 }
 
 function showCreateForm(container) {

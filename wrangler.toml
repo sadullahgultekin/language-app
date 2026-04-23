@@ -9,3 +9,6 @@ directory = "./public"
 binding = "DB"
 database_name = "vocab-db"
 database_id = "d98705ec-7e74-4313-8141-e96ee5bc8ae9"
+
+[triggers]
+crons = ["0 6 * * *"]

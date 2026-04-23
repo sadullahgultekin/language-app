@@ -35,6 +35,13 @@ export const api = {
   deleteWord: (id) =>
     request(`/words/${id}`, { method: 'DELETE' }),
 
+  // Push notifications
+  getVapidPublicKey: () => request('/push/vapid-public-key'),
+  subscribePush: (sub) =>
+    request('/push/subscribe', { method: 'POST', body: JSON.stringify(sub) }),
+  unsubscribePush: (endpoint) =>
+    request('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+
   // Study
   getStudyDeck: (listIds, practice = false) =>
     request(listIds ? `/study?lists=${listIds.join(',')}${practice ? '&practice=1' : ''}` : `/study?lists=all${practice ? '&practice=1' : ''}`),
