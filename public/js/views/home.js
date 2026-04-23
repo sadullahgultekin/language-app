@@ -50,16 +50,18 @@ export async function renderHome(container) {
     card.className = 'card list-card';
     const color = CARD_COLORS[i % CARD_COLORS.length];
     const initial = list.name.charAt(0).toUpperCase();
-    const confidencePct = list.word_count > 0 ? Math.round((list.avg_confidence / 5) * 100) : 0;
+    const dueBadge = list.due_count > 0 ? `<span class="badge badge-due">${list.due_count} due</span>` : '';
+    const newBadge = list.new_count > 0 ? `<span class="badge badge-new">${list.new_count} new</span>` : '';
+    const nothingBadge = (!list.due_count && !list.new_count && list.word_count > 0) ? `<span class="badge badge-done">&#10003; caught up</span>` : '';
 
     card.innerHTML = `
       <div class="card-icon ${color}">${initial}</div>
       <div class="card-content">
         <h3>${esc(list.name)}</h3>
         <p class="meta">${list.word_count} word${list.word_count !== 1 ? 's' : ''}${list.description ? ' &middot; ' + esc(list.description) : ''}</p>
+        <div class="badge-row">${dueBadge}${newBadge}${nothingBadge}</div>
       </div>
       <div class="card-right">
-        <div class="progress-bar"><div class="fill" style="width: ${confidencePct}%"></div></div>
         <div class="checkbox-area">
           <input type="checkbox" data-id="${list.id}" title="Select for study">
         </div>

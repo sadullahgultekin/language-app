@@ -1,22 +1,43 @@
 import { api } from '../api.js';
 
-export async function renderStudy(container, listIds) {
+export async function renderStudy(container, listIds, practice = false) {
   container.innerHTML = '<p style="text-align:center;padding:40px;font-weight:700;color:#999">Loading study deck...</p>';
 
-  const deck = await api.getStudyDeck(listIds);
+  const deck = await api.getStudyDeck(listIds, practice);
 
   if (deck.length === 0) {
     container.innerHTML = '';
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.innerHTML = `
-      <span class="empty-icon">&#128566;</span>
-      <h3>No words to study</h3>
-      <p>The selected lists have no words yet.</p>
-      <br>
-      <a href="#/" class="btn-primary" style="text-decoration:none;padding:14px 28px;display:inline-block">Back to lists</a>
-    `;
+
+    if (practice) {
+      // practice=true but still empty means the list truly has no words
+      empty.innerHTML = `
+        <span class="empty-icon">&#128566;</span>
+        <h3>No words to study</h3>
+        <p>The selected lists have no words yet.</p>
+        <br>
+        <a href="#/" class="btn-primary" style="text-decoration:none;padding:14px 28px;display:inline-block">Back to lists</a>
+      `;
+    } else {
+      empty.innerHTML = `
+        <span class="empty-icon">&#127881;</span>
+        <h3>All caught up!</h3>
+        <p>Nothing is due right now. Come back later or practice early.</p>
+        <br>
+        <button class="btn-secondary" id="practice-btn" style="margin-right:12px">Practice anyway</button>
+        <a href="#/" class="btn-primary" style="text-decoration:none;padding:14px 28px;display:inline-block">Back to lists</a>
+      `;
+    }
+
     container.appendChild(empty);
+
+    if (!practice) {
+      const practiceBtn = container.querySelector('#practice-btn');
+      if (practiceBtn) {
+        practiceBtn.addEventListener('click', () => renderStudy(container, listIds, true));
+      }
+    }
     return;
   }
 
@@ -72,15 +93,17 @@ export async function renderStudy(container, listIds) {
   const actions = document.createElement('div');
   actions.className = 'study-actions';
   actions.innerHTML = `
-    <button class="btn-danger" id="missed-btn">Missed it</button>
-    <button class="btn-primary" id="got-btn">Got it!</button>
+    <button class="btn-grade btn-again" id="again-btn" title="1">Again</button>
+    <button class="btn-grade btn-hard"  id="hard-btn"  title="2">Hard</button>
+    <button class="btn-grade btn-good"  id="good-btn"  title="3">Good</button>
+    <button class="btn-grade btn-easy"  id="easy-btn"  title="4">Easy</button>
   `;
   studyContainer.appendChild(actions);
 
   // Keyboard hint
   const hint = document.createElement('div');
   hint.className = 'study-hint';
-  hint.innerHTML = 'Space: flip &middot; &rarr; / Enter: got it &middot; &larr;: missed it / back';
+  hint.innerHTML = 'Space: flip &middot; 1/&larr;: Again &middot; 2: Hard &middot; 3/&rarr;/Enter: Good &middot; 4: Easy';
   studyContainer.appendChild(hint);
 
   // Swipe hint (only shown on touch)
@@ -229,13 +252,14 @@ export async function renderStudy(container, listIds) {
     }
   }
 
-  function answer(correct, viaSwipe) {
+  // grade: 1=Again 2=Hard 3=Good 4=Easy
+  function answer(grade, viaSwipe) {
     if (!flipped || animating || reviewing) return;
     animating = true;
 
     const word = deck[current];
-    results.push({ ...word, correct });
-    api.recordResult(word.id, correct);
+    results.push({ ...word, correct: grade >= 3 });
+    api.recordResult(word.id, grade);
 
     if (viaSwipe) {
       setTimeout(() => advance(true), 280);
@@ -267,8 +291,10 @@ export async function renderStudy(container, listIds) {
     flip();
   });
 
-  actions.querySelector('#got-btn').onclick = () => answer(true, false);
-  actions.querySelector('#missed-btn').onclick = () => answer(false, false);
+  actions.querySelector('#again-btn').onclick = () => answer(1, false);
+  actions.querySelector('#hard-btn').onclick  = () => answer(2, false);
+  actions.querySelector('#good-btn').onclick  = () => answer(3, false);
+  actions.querySelector('#easy-btn').onclick  = () => answer(4, false);
 
   // Keyboard
   function onKey(e) {
@@ -280,20 +306,27 @@ export async function renderStudy(container, listIds) {
       if (reviewing) {
         navFwd.onclick();
       } else {
-        answer(true, false);
+        answer(3, false); // Good
       }
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
       if (reviewing) {
         navBack.onclick();
       } else {
-        // If not flipped, go back to review; if flipped, record as missed
         if (!flipped) {
           navBack.onclick();
         } else {
-          answer(false, false);
+          answer(1, false); // Again
         }
       }
+    } else if (e.key === '1') {
+      answer(1, false);
+    } else if (e.key === '2') {
+      answer(2, false);
+    } else if (e.key === '3') {
+      answer(3, false);
+    } else if (e.key === '4') {
+      answer(4, false);
     }
   }
   document.addEventListener('keydown', onKey);
@@ -355,7 +388,7 @@ export async function renderStudy(container, listIds) {
       const flyX = direction * window.innerWidth;
       flashcard.style.transform = `rotateY(180deg) translateX(${-flyX}px) rotate(${-direction * 20}deg)`;
       flashcard.style.opacity = '0';
-      answer(direction > 0, true);
+      answer(direction > 0 ? 3 : 1, true); // right=Good(3), left=Again(1)
     } else {
       flashcard.style.transform = 'rotateY(180deg)';
       correctOverlay.style.opacity = '0';

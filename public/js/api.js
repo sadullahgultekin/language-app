@@ -36,8 +36,8 @@ export const api = {
     request(`/words/${id}`, { method: 'DELETE' }),
 
   // Study
-  getStudyDeck: (listIds) =>
-    request(listIds ? `/study?lists=${listIds.join(',')}` : '/study?lists=all'),
-  recordResult: (wordId, correct) =>
-    request('/study/result', { method: 'POST', body: JSON.stringify({ word_id: wordId, correct }) }),
+  getStudyDeck: (listIds, practice = false) =>
+    request(listIds ? `/study?lists=${listIds.join(',')}${practice ? '&practice=1' : ''}` : `/study?lists=all${practice ? '&practice=1' : ''}`),
+  recordResult: (wordId, grade) =>
+    request('/study/result', { method: 'POST', body: JSON.stringify({ word_id: wordId, grade }) }),
 };

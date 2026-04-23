@@ -1,6 +1,10 @@
 import { Env, List, ListWithCount, Word, StudyWord } from '../types';
+import { schedule, Grade, SM2State } from './sm2';
 
 type DB = Env['DB'];
+
+const MAX_NEW_PER_DAY = 20;
+const MAX_REVIEWS_PER_DAY = 200;
 
 // --- Lists ---
 
@@ -8,7 +12,8 @@ export async function getAllLists(db: DB): Promise<ListWithCount[]> {
   const { results } = await db.prepare(`
     SELECT l.*,
       COUNT(w.id) as word_count,
-      COALESCE(AVG(sp.confidence), 0) as avg_confidence
+      COUNT(CASE WHEN sp.due_at IS NOT NULL AND sp.due_at <= datetime('now') THEN 1 END) as due_count,
+      COUNT(CASE WHEN sp.id IS NULL THEN 1 END) as new_count
     FROM lists l
     LEFT JOIN words w ON w.list_id = l.id
     LEFT JOIN study_progress sp ON sp.word_id = w.id
@@ -78,57 +83,94 @@ export async function deleteWord(db: DB, id: number): Promise<void> {
 
 // --- Study ---
 
-export async function getStudyDeck(db: DB, listIds: number[] | null): Promise<StudyWord[]> {
+async function getTodayStats(db: DB): Promise<{ new_introduced: number; reviews_done: number }> {
+  const today = new Date().toISOString().slice(0, 10);
+  const row = await db.prepare(
+    'SELECT new_introduced, reviews_done FROM daily_stats WHERE date = ?'
+  ).bind(today).first<{ new_introduced: number; reviews_done: number }>();
+  return row ?? { new_introduced: 0, reviews_done: 0 };
+}
+
+export async function getStudyDeck(db: DB, listIds: number[] | null, practice = false): Promise<StudyWord[]> {
   const allWords = listIds === null;
   const placeholders = allWords ? '' : listIds!.map(() => '?').join(',');
-  const whereClause = allWords ? '' : `WHERE w.list_id IN (${placeholders})`;
-  const bindings = allWords ? [] : listIds!;
-  // Spaced repetition intervals (in hours) per confidence level:
-  // 0 = new word, 1 = 4h, 2 = 24h (1 day), 3 = 72h (3 days), 4 = 168h (7 days), 5 = 336h (14 days)
-  //
-  // Priority order:
-  //   1. Never-seen words (no study_progress row or last_studied IS NULL) — priority 0
-  //   2. Overdue words (past their review interval) — priority 1, sorted by how overdue they are (most overdue first)
-  //   3. Not-yet-due words — priority 2, sorted by confidence ASC
-  const { results } = await db.prepare(`
+  const whereClause = allWords ? '' : `AND w.list_id IN (${placeholders})`;
+  const bindings: (number | string)[] = allWords ? [] : listIds!;
+
+  const todayStats = await getTodayStats(db);
+  const newBudget = Math.max(0, MAX_NEW_PER_DAY - todayStats.new_introduced);
+  const reviewBudget = Math.max(0, MAX_REVIEWS_PER_DAY - todayStats.reviews_done);
+
+  // 1. Learning queue: words in learning phase that are due
+  const { results: learningCards } = await db.prepare(`
     SELECT w.*,
-      COALESCE(sp.confidence, 0) as confidence,
-      COALESCE(sp.correct_count, 0) as correct_count,
-      COALESCE(sp.incorrect_count, 0) as incorrect_count,
-      CASE
-        WHEN sp.last_studied IS NULL THEN 0
-        WHEN (julianday('now') - julianday(sp.last_studied)) * 24 >=
-          CASE COALESCE(sp.confidence, 0)
-            WHEN 0 THEN 0
-            WHEN 1 THEN 4
-            WHEN 2 THEN 24
-            WHEN 3 THEN 72
-            WHEN 4 THEN 168
-            WHEN 5 THEN 336
-          END
-        THEN 1
-        ELSE 2
-      END as priority,
-      CASE
-        WHEN sp.last_studied IS NOT NULL THEN
-          (julianday('now') - julianday(sp.last_studied)) * 24 -
-          CASE COALESCE(sp.confidence, 0)
-            WHEN 0 THEN 0
-            WHEN 1 THEN 4
-            WHEN 2 THEN 24
-            WHEN 3 THEN 72
-            WHEN 4 THEN 168
-            WHEN 5 THEN 336
-          END
-        ELSE 999999
-      END as hours_overdue
+      sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
+      sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
+      0 as is_new, 1 as is_learning, 0 as is_review,
+      0 as priority
     FROM words w
-    LEFT JOIN study_progress sp ON sp.word_id = w.id
-    ${whereClause}
-    ORDER BY priority ASC, hours_overdue DESC, RANDOM()
-    LIMIT 30
+    JOIN study_progress sp ON sp.word_id = w.id
+    WHERE sp.learning_step > 0
+      AND sp.due_at <= datetime('now')
+      ${whereClause}
+    ORDER BY sp.due_at ASC
   `).bind(...bindings).all<StudyWord>();
-  return results;
+
+  // 2. Review queue: graduated cards that are due (respects daily cap)
+  const { results: reviewCards } = await db.prepare(`
+    SELECT w.*,
+      sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
+      sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
+      0 as is_new, 0 as is_learning, 1 as is_review,
+      1 as priority
+    FROM words w
+    JOIN study_progress sp ON sp.word_id = w.id
+    WHERE sp.learning_step = 0
+      AND sp.due_at <= datetime('now')
+      ${whereClause}
+    ORDER BY sp.due_at ASC, RANDOM()
+    LIMIT ?
+  `).bind(...bindings, reviewBudget).all<StudyWord>();
+
+  // 3. New queue: words with no progress row yet (respects daily cap)
+  const { results: newCards } = newBudget > 0
+    ? await db.prepare(`
+        SELECT w.*,
+          2.5 as easiness, 0 as interval_days, 0 as repetitions, 1 as learning_step,
+          0 as lapses, 0 as correct_count, 0 as incorrect_count, NULL as due_at,
+          1 as is_new, 0 as is_learning, 0 as is_review,
+          2 as priority
+        FROM words w
+        LEFT JOIN study_progress sp ON sp.word_id = w.id
+        WHERE sp.id IS NULL
+          ${whereClause}
+        ORDER BY w.created_at ASC
+        LIMIT ?
+      `).bind(...bindings, newBudget).all<StudyWord>()
+    : { results: [] as StudyWord[] };
+
+  const deck = [...learningCards, ...reviewCards, ...newCards];
+
+  // 4. Filler (practice mode only): not-yet-due cards
+  if (practice && deck.length === 0) {
+    const { results: practiceCards } = await db.prepare(`
+      SELECT w.*,
+        sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
+        sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
+        0 as is_new, 0 as is_learning, 1 as is_review,
+        3 as priority
+      FROM words w
+      JOIN study_progress sp ON sp.word_id = w.id
+      WHERE sp.learning_step = 0
+        AND sp.due_at > datetime('now')
+        ${whereClause}
+      ORDER BY sp.due_at ASC
+      LIMIT 30
+    `).bind(...bindings).all<StudyWord>();
+    return practiceCards;
+  }
+
+  return deck.slice(0, 30);
 }
 
 export async function resetListProgress(db: DB, listId: number): Promise<void> {
@@ -138,24 +180,76 @@ export async function resetListProgress(db: DB, listId: number): Promise<void> {
   `).bind(listId).run();
 }
 
-export async function recordStudyResult(db: DB, wordId: number, correct: boolean): Promise<void> {
-  if (correct) {
+export async function recordStudyResult(db: DB, wordId: number, grade: Grade): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Get or create study_progress row
+  const existing = await db.prepare(
+    'SELECT * FROM study_progress WHERE word_id = ?'
+  ).bind(wordId).first<SM2State & { due_at: string | null }>();
+
+  const isNew = existing === null;
+
+  const currentState: SM2State = existing ?? {
+    easiness: 2.5,
+    interval_days: 0,
+    repetitions: 0,
+    learning_step: 1,
+    lapses: 0,
+  };
+
+  const wasDue = existing === null
+    ? true // new words are always "due"
+    : existing.due_at !== null && existing.due_at <= new Date().toISOString();
+
+  const result = schedule({ ...currentState, grade, was_due: wasDue });
+
+  const nowIso = new Date().toISOString();
+  const dueIso = new Date(Date.now() + result.next_due_minutes * 60 * 1000).toISOString();
+
+  const correctDelta = grade >= 3 ? 1 : 0;
+  const incorrectDelta = grade === 1 ? 1 : 0;
+
+  if (isNew) {
     await db.prepare(`
-      INSERT INTO study_progress (word_id, correct_count, confidence, last_studied)
-      VALUES (?, 1, 1, datetime('now'))
-      ON CONFLICT(word_id) DO UPDATE SET
-        correct_count = correct_count + 1,
-        confidence = MIN(5, confidence + 1),
-        last_studied = datetime('now')
-    `).bind(wordId).run();
+      INSERT INTO study_progress
+        (word_id, easiness, interval_days, repetitions, learning_step, lapses,
+         correct_count, incorrect_count, due_at, last_studied, introduced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      wordId,
+      result.easiness, result.interval_days, result.repetitions,
+      result.learning_step, result.lapses,
+      correctDelta, incorrectDelta,
+      dueIso, nowIso, nowIso
+    ).run();
+
+    // Increment new_introduced for today
+    await db.prepare(`
+      INSERT INTO daily_stats (date, new_introduced, reviews_done) VALUES (?, 1, 0)
+      ON CONFLICT(date) DO UPDATE SET new_introduced = new_introduced + 1
+    `).bind(today).run();
   } else {
     await db.prepare(`
-      INSERT INTO study_progress (word_id, incorrect_count, confidence, last_studied)
-      VALUES (?, 1, 0, datetime('now'))
-      ON CONFLICT(word_id) DO UPDATE SET
-        incorrect_count = incorrect_count + 1,
-        confidence = MAX(0, confidence - 1),
-        last_studied = datetime('now')
-    `).bind(wordId).run();
+      UPDATE study_progress SET
+        easiness = ?, interval_days = ?, repetitions = ?, learning_step = ?,
+        lapses = ?,
+        correct_count = correct_count + ?,
+        incorrect_count = incorrect_count + ?,
+        due_at = ?,
+        last_studied = ?
+      WHERE word_id = ?
+    `).bind(
+      result.easiness, result.interval_days, result.repetitions,
+      result.learning_step, result.lapses,
+      correctDelta, incorrectDelta,
+      dueIso, nowIso,
+      wordId
+    ).run();
+
+    await db.prepare(`
+      INSERT INTO daily_stats (date, new_introduced, reviews_done) VALUES (?, 0, 1)
+      ON CONFLICT(date) DO UPDATE SET reviews_done = reviews_done + 1
+    `).bind(today).run();
   }
 }
