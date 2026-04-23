@@ -208,7 +208,7 @@ export async function recordStudyResult(db: DB, wordId: number, grade: Grade): P
   const dueIso = new Date(Date.now() + result.next_due_minutes * 60 * 1000).toISOString();
 
   const correctDelta = grade >= 3 ? 1 : 0;
-  const incorrectDelta = grade === 1 ? 1 : 0;
+  const incorrectDelta = grade <= 2 ? 1 : 0;
 
   if (isNew) {
     await db.prepare(`
