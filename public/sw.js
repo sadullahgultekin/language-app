@@ -1,4 +1,4 @@
-const CACHE = 'vocab-33851fd';
+const CACHE = 'vocab-75e25af';
 const SHELL = [
   '/',
   '/css/style.css',
