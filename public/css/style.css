@@ -587,6 +587,30 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
   font-weight: 400;
   max-width: 400px;
 }
+.flashcard-back .card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.flashcard-back .card-list-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+.flashcard-back .card-practice-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--amber, #f59e0b);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
 
 /* ─── Swipe overlays ─── */
 .swipe-overlay {

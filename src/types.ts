@@ -43,6 +43,7 @@ export interface StudyProgress {
 }
 
 export interface StudyWord extends Word {
+  list_name: string;
   easiness: number;
   interval_days: number;
   repetitions: number;

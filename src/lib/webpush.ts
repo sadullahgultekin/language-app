@@ -26,7 +26,7 @@ async function makeVAPIDJWT(audience: string, publicKeyB64url: string, privateKe
   const payload = b64urlEncode(new TextEncoder().encode(JSON.stringify({
     aud: audience,
     exp: now + 12 * 3600,
-    sub: 'mailto:notifications@language-app.local',
+    sub: 'mailto:sadullahgultekin@gmail.com',
   })));
   const signingInput = `${header}.${payload}`;
   const key = await importPrivateKey(privateKeyB64url);

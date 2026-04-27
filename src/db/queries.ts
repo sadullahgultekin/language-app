@@ -104,13 +104,14 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
 
   // 1. Learning queue: words in learning phase that are due (always count toward progress)
   const { results: learningCards } = await db.prepare(`
-    SELECT w.*,
+    SELECT w.*, l.name as list_name,
       sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
       sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
       0 as is_new, 1 as is_learning, 0 as is_review,
       1 as counts_toward_progress,
       0 as priority
     FROM words w
+    JOIN lists l ON l.id = w.list_id
     JOIN study_progress sp ON sp.word_id = w.id
     WHERE sp.learning_step > 0
       AND sp.due_at <= datetime('now')
@@ -120,13 +121,14 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
 
   // 2. Review queue: graduated cards that are due (always count toward progress)
   const { results: reviewCards } = await db.prepare(`
-    SELECT w.*,
+    SELECT w.*, l.name as list_name,
       sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
       sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
       0 as is_new, 0 as is_learning, 1 as is_review,
       1 as counts_toward_progress,
       1 as priority
     FROM words w
+    JOIN lists l ON l.id = w.list_id
     JOIN study_progress sp ON sp.word_id = w.id
     WHERE sp.learning_step = 0
       AND sp.due_at <= datetime('now')
@@ -139,12 +141,13 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
   const newSlots = Math.max(0, MAX_DECK_SIZE - learningCards.length - reviewCards.length);
   const { results: newCardsRaw } = newSlots > 0
     ? await db.prepare(`
-        SELECT w.*,
+        SELECT w.*, l.name as list_name,
           2.5 as easiness, 0 as interval_days, 0 as repetitions, 1 as learning_step,
           0 as lapses, 0 as correct_count, 0 as incorrect_count, NULL as due_at,
           1 as is_new, 0 as is_learning, 0 as is_review,
           2 as priority
         FROM words w
+        JOIN lists l ON l.id = w.list_id
         LEFT JOIN study_progress sp ON sp.word_id = w.id
         WHERE sp.id IS NULL
           ${whereClause}
@@ -167,13 +170,14 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
 
     // 4a. Learning-phase cards not yet due (already introduced, so no progress impact)
     const { results: learningNotDue } = await db.prepare(`
-      SELECT w.*,
+      SELECT w.*, l.name as list_name,
         sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
         sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
         0 as is_new, 1 as is_learning, 0 as is_review,
         0 as counts_toward_progress,
         0 as priority
       FROM words w
+      JOIN lists l ON l.id = w.list_id
       JOIN study_progress sp ON sp.word_id = w.id
       WHERE sp.learning_step > 0
         AND sp.due_at > datetime('now')
@@ -186,12 +190,13 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
     const newSlotsInPractice = Math.max(0, practiceSlots - learningNotDue.length);
     const { results: neverSeenRaw } = newSlotsInPractice > 0
       ? await db.prepare(`
-          SELECT w.*,
+          SELECT w.*, l.name as list_name,
             2.5 as easiness, 0 as interval_days, 0 as repetitions, 1 as learning_step,
             0 as lapses, 0 as correct_count, 0 as incorrect_count, NULL as due_at,
             1 as is_new, 0 as is_learning, 0 as is_review,
             2 as priority
           FROM words w
+          JOIN lists l ON l.id = w.list_id
           LEFT JOIN study_progress sp ON sp.word_id = w.id
           WHERE sp.id IS NULL
             ${whereClause}
@@ -209,13 +214,14 @@ export async function getStudyDeck(db: DB, listIds: number[] | null, practice = 
     const graduatedSlots = Math.max(0, practiceSlots - learningNotDue.length - neverSeen.length);
     const { results: graduatedNotDue } = graduatedSlots > 0
       ? await db.prepare(`
-          SELECT w.*,
+          SELECT w.*, l.name as list_name,
             sp.easiness, sp.interval_days, sp.repetitions, sp.learning_step,
             sp.lapses, sp.correct_count, sp.incorrect_count, sp.due_at,
             0 as is_new, 0 as is_learning, 1 as is_review,
             0 as counts_toward_progress,
             3 as priority
           FROM words w
+          JOIN lists l ON l.id = w.list_id
           JOIN study_progress sp ON sp.word_id = w.id
           WHERE sp.learning_step = 0
             AND sp.due_at > datetime('now')

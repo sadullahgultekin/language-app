@@ -82,6 +82,10 @@ export async function renderStudy(container, listIds, practice = false) {
       <div class="flashcard-face flashcard-back">
         <div class="translation"></div>
         <div class="description"></div>
+        <div class="card-meta">
+          <span class="card-list-name"></span>
+          <span class="card-practice-badge" style="display:none">Practice only</span>
+        </div>
         <div class="swipe-overlay swipe-correct"></div>
         <div class="swipe-overlay swipe-wrong"></div>
       </div>
@@ -138,6 +142,9 @@ export async function renderStudy(container, listIds, practice = false) {
     wrapper.querySelector('.word').textContent = word.word;
     wrapper.querySelector('.translation').textContent = word.translation;
     wrapper.querySelector('.description').textContent = word.description || '';
+    wrapper.querySelector('.card-list-name').textContent = word.list_name || '';
+    const practiceBadge = wrapper.querySelector('.card-practice-badge');
+    practiceBadge.style.display = word.counts_toward_progress === 0 ? 'inline' : 'none';
   }
 
   function showCard(enterWithZoom) {
@@ -170,8 +177,7 @@ export async function renderStudy(container, listIds, practice = false) {
       flashcard.style.opacity = '1';
 
       setTimeout(() => {
-        wrapper.querySelector('.translation').textContent = word.translation;
-        wrapper.querySelector('.description').textContent = word.description || '';
+        populateCard(word);
         flashcard.style.transition = '';
         flashcard.style.transform = '';
       }, 320);
@@ -180,8 +186,7 @@ export async function renderStudy(container, listIds, practice = false) {
       flashcard.style.transition = '';
 
       const onDone = () => {
-        wrapper.querySelector('.translation').textContent = word.translation;
-        wrapper.querySelector('.description').textContent = word.description || '';
+        populateCard(word);
         flashcard.removeEventListener('transitionend', onDone);
       };
       flashcard.addEventListener('transitionend', onDone);
