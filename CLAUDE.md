@@ -54,3 +54,13 @@ New migrations go in `/migrations/` as sequentially named SQL files. Apply local
 - No build step — raw ES6 modules loaded directly by the browser
 - PWA-ready with `manifest.json` and service worker
 - `public/js/api.js` is the single fetch wrapper; all views import from it
+
+## PWA Cache Busting
+
+Cloudflare deploys directly from git with no build step, so `public/sw.js` must have its cache name updated manually on every commit. **On every commit, update the cache name in `public/sw.js` line 1 to use the new commit hash:**
+
+```js
+const CACHE = 'vocab-<short-hash>';  // e.g. vocab-33851fd
+```
+
+Get the hash with `git rev-parse --short HEAD` after staging your changes (it reflects the previous commit at that point — use it as a unique token, exact match doesn't matter). Stage and include the `sw.js` change in the same commit.
